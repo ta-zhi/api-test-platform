@@ -24,6 +24,17 @@ concurrency:
   group: api-test-${{ github.ref }}
   cancel-in-progress: true
 
+# 【为什么要显式声明权限？】
+# GitHub 给每个任务发的 GITHUB_TOKEN 默认是【只读】的，什么都改不了。
+# 想往 Pages 站点写东西，就必须明说要这两项：
+#     pages: write    —— 允许往 Pages 写
+#     id-token: write —— 允许用 OIDC 令牌向 Pages 服务证明"我确实是这个仓库的 CI"
+# 不写这两行，部署那一步会直接报权限不足。
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 jobs:
   api-test:
     name: 跑接口自动化用例
@@ -33,6 +44,10 @@ jobs:
     # 版本写死，构建才可复现。
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # 把"报告到底生成出来没有"这个结论，传给下面那个部署 job。
+    # job 之间互相看不见对方的环境，只能靠 outputs 这样递话。
+    outputs:
+      report_ok: ${{ steps.check_report.outputs.ok }}
 
     steps:
       - name: 拉取代码
@@ -162,3 +177,70 @@ jobs:
           name: allure-results-raw
           path: api_test/allure_results
           if-no-files-found: warn
+
+      # ------------------------------------------------------------
+      # 以下两步：为"发布成网页"做准备
+      # ------------------------------------------------------------
+
+      # 【为什么要先检查一下报告存在不存在？】
+      # 上面生成报告那步是 continue-on-error 的 —— 它可能悄悄失败了。
+      # 如果不管三七二十一直接发布，就会把上一次【能看的】线上报告，
+      # 覆盖成一个空白页。宁可这次不更新，也别把好东西弄坏。
+      #
+      # 把结论写进 $GITHUB_OUTPUT，下一个 job 就能读到（见 job 顶部的 outputs）。
+      - name: 确认报告真的生成出来了
+        id: check_report
+        if: always()
+        run: |
+          if [ -f api_test/allure_report/index.html ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "报告已生成"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::报告没生成出来，跳过 Pages 发布（线上仍是上一次的报告）"
+          fi
+
+      # 这一步只是把报告目录打成 tar 包传给部署 job，还没真的发布。
+      # 注意 artifact 名字是固定的 github-pages —— deploy-pages 就认这个名字。
+      - name: 打包 Pages 产物
+        if: always() && steps.check_report.outputs.ok == 'true'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: api_test/allure_report
+
+  # ============================================================
+  #  把生成好的 Allure 报告发布成一个能直接点开的网址
+  #
+  #  为什么必须单独开一个 job？
+  #  Pages 的发布要绑定 environment（github-pages），这是 GitHub 的一套
+  #  环境级机制：发布出去的网址会显示在仓库首页右侧，还能配审批、配分支限制。
+  #  它是"环境"维度的东西，塞不进上面那个普通 job 里。
+  # ============================================================
+  deploy-pages:
+    name: 发布报告到 GitHub Pages
+    needs: api-test
+
+    # 【为什么是 always() && 那个条件？】
+    # 不加 always() 的话：上面 job 只要红了，这个 job 默认直接跳过 ——
+    #   而用例失败的时候恰恰是最需要看报告的时候。
+    # 所以先 always() 强行执行，再用 outputs 判断报告到底有没有生成出来。
+    if: always() && needs.api-test.outputs.report_ok == 'true'
+
+    runs-on: ubuntu-24.04
+
+    # Pages 的发布【不能并发】—— 两个任务同时往上写会互相打架。
+    # 所以这里单独设一个并发组，而且 cancel-in-progress: false：
+    # 宁可排队等一会儿，也不要把一次发布打断成半个。上面那个取消逻辑
+    # 是为了省 CI 额度，但发布必须是完整的。
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: 发布
+        id: deployment
+        uses: actions/deploy-pages@v5

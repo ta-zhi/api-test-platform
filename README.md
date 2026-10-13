@@ -1,6 +1,7 @@
 # 接口自动化测试平台
 
 [![接口自动化测试](https://github.com/ta-zhi/api-test-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/ta-zhi/api-test-platform/actions/workflows/ci.yml)
+[![在线测试报告](https://img.shields.io/badge/Allure-%E5%9C%A8%E7%BA%BF%E6%B5%8B%E8%AF%95%E6%8A%A5%E5%91%8A-blue)](https://ta-zhi.github.io/api-test-platform/)
 
 一个**自己测自己**的测试闭环：为了有东西可测，先手写了一组 REST 接口；再用 pytest 搭一套分层接口自动化框架测它；另外用 Locust 压它、定位并优化了数据库瓶颈；最后把整个流程接进测试平台，一键执行、自动出 Allure 报告。
 
@@ -50,12 +51,17 @@ python run_tests.py -m regression  # 只跑回归用例
 
 1. 拉代码、装依赖、起被测服务
 2. 跑全部 44 条用例（**用例失败会让这次构建变红**）
-3. 生成 Allure 报告并作为构建产物留存
+3. 生成 Allure 报告 → 发布成在线网页，同时作为构建产物留档
 
-在 Actions 页面点进任意一次运行，底部 **Artifacts** 里能下载 `allure-report`。
+**[📊 在线测试报告](https://ta-zhi.github.io/api-test-platform/)** ← 直接点开就能看，不用下载
 
-> ⚠️ 下载下来的是静态 HTML。直接双击用 `file://` 打开常因浏览器安全策略白屏，
-> 这是正常现象。想正常浏览可以本地跑 `allure open <报告目录>`。
+实现方式：报告用 `upload-pages-artifact` 打成包，再由 `deploy-pages`
+发布到 GitHub Pages。注意这两步在**单独的 job** 里，且带 `always()` ——
+用例失败时报告照样发布，因为那正是最需要看报告的时候。
+
+> 💡 为什么不用"下载 artifact 双击打开"？下载下来的是静态 HTML，
+> 用 `file://` 打开会因为浏览器禁止本地页面读取本地文件而白屏。
+> 想本地看可以跑 `allure open <报告目录>`（它会起个本地服务器）。
 
 ## 技术栈
 
