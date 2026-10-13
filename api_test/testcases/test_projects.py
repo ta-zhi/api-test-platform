@@ -25,7 +25,7 @@ def test_list_projects(projects_api):
     """查询全部项目，应返回 200 且是一个列表"""
     response = projects_api.list_projects()
 
-    assert response.status_code == 200
+    assert response.status_code == 999
     assert isinstance(response.json(), list)
 
 
