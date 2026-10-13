@@ -1,0 +1,20 @@
+# ============================================================
+#  性能测试依赖 —— 「跑 Locust 压测」额外需要什么
+#
+#  安装：pip install -r requirements-perf.txt
+#  用法见 perf_test/run_ladder.py
+#
+#  【为什么单独拆出来，不并进 requirements-test.txt？】
+#  locust 会顺手拖进 gevent、pyzmq 等一批较重的依赖。
+#  而 CI 只跑接口用例、根本不压测 —— 让每次 CI 都白装一遍，
+#  只会拖慢构建、增大"装依赖失败"的概率。
+#
+#  这就是依赖分层的意思：
+#      跑应用    → requirements.txt
+#      跑接口用例 → requirements-test.txt   （CI 用）
+#      跑压测    → requirements-perf.txt   （只在本地按需装）
+# ============================================================
+
+-r requirements-test.txt
+
+locust==2.46.5

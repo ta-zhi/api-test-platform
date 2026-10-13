@@ -1,0 +1,72 @@
+# ============================================================
+#  .gitignore —— 哪些东西【不该】进仓库
+#
+#  判断标准就一条：这东西是"代码"，还是"跑出来的东西/别人能自己装的东西"？
+#      代码        → 进仓库
+#      产物、依赖、密钥、本机配置 → 不进
+#
+#  每次 `git add .` 之前，先 `git status` 看一眼清单，
+#  确认 .venv/、db.sqlite3、tools/ 这些没混进暂存区。
+# ============================================================
+
+# ---------- Python 运行产物 ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+
+# ---------- 虚拟环境 ----------
+# 182M，而且是 Windows 专用的，别人在 Mac/Linux 上根本用不了，得自己建
+.venv/
+venv/
+env/
+
+# ---------- Django 数据库 ----------
+# 这是【本机跑出来的数据】，不是代码。
+# 传上去会让别人拿到你那些压测遗留的 1 万多条脏数据。
+# 别人 clone 下来跑一次 `manage.py migrate` 就有干净的库了。
+db.sqlite3
+db.sqlite3-journal
+db.sqlite3-wal
+db.sqlite3-shm
+
+# ---------- 测试 / 报告产物 ----------
+.pytest_cache/
+# Allure 的原始 JSON，每次跑都会重新生成
+allure_results/
+# 生成出来的 HTML 报告
+allure_report/
+# 又一份 Allure 报告（9 月手工生成留下的，3.1M、212 个文件）
+# 全项目没有任何代码引用它，纯粹是产物 —— 本地可以直接删掉
+api_test/report/
+# Locust 压测的 CSV
+perf_test/results/
+*.log
+
+# ---------- 用户上传 / 平台生成的文件 ----------
+# MEDIA_ROOT，里面是测试用例上传件和历史报告，12M
+uploads/
+
+# ---------- 本地工具（330M 的 allure + JDK）----------
+# 这些是"环境"，不是"项目"。
+# CI 里会自己去 GitHub 下载 allure；别人本地装了就有，不用你带。
+tools/
+
+# ---------- IDE / 操作系统 ----------
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---------- 本地调试 / 演示脚本（不入库）----------
+# 这些是我为了"跑起来看现象"临时写的小脚本：
+#   锁演示、WAL 演示、分页演示、URL 演示、请求体演示、异步演示、bug 原理演示
+# 留在本地自用；仓库里只放正经的工程代码。
+_demo_*.py
+_check_db.py
+verify_p0.py
+perf_test/_lock_demo.py
+perf_test/_wal_demo.py

@@ -1,0 +1,52 @@
+# 新增项目接口（POST /api/projects/）的测试数据
+#
+# 规则：这里一条数据 = 用例跑一次。
+# 想加一组测试数据，只要在这里加一段，不用碰任何 Python 代码。
+#
+# 字段说明：
+#   title          用例在报告里显示的名字（必须唯一，不然报告分不清是哪条）
+#   name           发给接口的项目名
+#   description    发给接口的项目描述
+#   expect_status  期望服务端返回的状态码
+#   need_cleanup   跑完要不要删掉造出来的数据（只有创建成功的才需要）
+
+# ============================================================
+# 一、正常数据 —— 应该创建成功，返回 201
+# ============================================================
+
+- title: 正常创建
+  name: 数据驱动-普通项目
+  description: 一条普普通通的数据
+  expect_status: 201
+  need_cleanup: true
+
+- title: 只有名字没有描述
+  name: 数据驱动-无描述
+  description: ""
+  expect_status: 201
+  need_cleanup: true
+
+- title: 名字刚好50个字符（边界内）
+  name: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  description: 正好卡在 max_length=50 的边界上，应该成功
+  expect_status: 201
+  need_cleanup: true
+
+# ============================================================
+# 二、异常数据 —— 应该被服务端拒绝，返回 400
+# ============================================================
+
+- title: 名字为空字符串
+  name: ""
+  description: 名字是必填项，空字符串应该被拒绝
+  expect_status: 400
+
+- title: 名字只有空格
+  name: "   "
+  description: 全是空格，去掉空格之后等于空，也应该被拒绝
+  expect_status: 400
+
+- title: 名字51个字符（超出边界）
+  name: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  description: 比 max_length=50 多一个字符，应该被拒绝
+  expect_status: 400

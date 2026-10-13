@@ -1,0 +1,164 @@
+# ============================================================
+#  持续集成：每次提交，自动跑一遍接口自动化用例
+#
+#  它到底解决了什么问题？
+#      以前：改完代码，能不能跑通全凭自觉 —— 忘了跑就是没跑。
+#      现在：只要 push 上去，GitHub 自己拉代码、起服务、跑用例，
+#            结果直接显示成一个勾或一个叉。
+#
+#  「测试左移」说的就是这件事：让问题暴露在提交的那一刻，
+#   而不是等发版前，或者等用户点出来。
+# ============================================================
+
+name: 接口自动化测试
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  # 允许在 Actions 页面手动点一下就跑，方便调试
+  workflow_dispatch:
+
+# 同一个分支连续 push 时，把还没跑完的旧任务取消掉，别排队浪费额度
+concurrency:
+  group: api-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-test:
+    name: 跑接口自动化用例
+    # 【为什么写死 24.04，不用 ubuntu-latest？】
+    # ubuntu-latest 正在往 26.04 迁移（默认 JDK 17 → 25，还移除了 Java 8）。
+    # 用 latest 意味着"某天早上起来 CI 突然红了，而我什么都没改"。
+    # 版本写死，构建才可复现。
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v7
+
+      - name: 装 Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      # Allure 命令行是 Java 写的，必须有 JRE。
+      # 虽然 runner 镜像自带 Java，但版本会随镜像漂移 —— 显式声明才稳。
+      - name: 装 Java（Allure 命令行要用）
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 装 Python 依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-test.txt
+
+      # 【这一步必须排在跑用例之前】
+      # 报告生成靠 allure 命令；它得先出现在 PATH 里，
+      # 否则后面 run_tests/生成报告时 shutil.which("allure") 拿到 None。
+      # GitHub 上装的 allure 用 GITHUB_PATH 追加目录，下一个 step 就生效了。
+      - name: 装 Allure 命令行
+        run: |
+          ALLURE_VERSION=2.39.0
+          curl -sSL -o /tmp/allure.tgz \
+            "https://github.com/allure-framework/allure2/releases/download/${ALLURE_VERSION}/allure-${ALLURE_VERSION}.tgz"
+          sudo tar -xzf /tmp/allure.tgz -C /opt
+          echo "/opt/allure-${ALLURE_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: 确认 Allure 装好了
+        run: allure --version
+
+      # 用全新的空库。
+      # 接口用例只做相对数量断言（before == after），不依赖任何预置数据，
+      # 所以不需要播种，空库直接跑。
+      - name: 初始化数据库
+        run: python manage.py migrate
+
+      # ------------------------------------------------------------
+      # 核心步骤：起被测服务 → 等它就绪 → 跑用例
+      #
+      # 【为什么服务和测试必须写在同一个 step 里？】
+      # 每个 run step 的输出都是 runner 抓的管道。后台进程继承了这两个 fd
+      # 又不关闭写端，runner 会一直等 EOF —— 表现成"这个 step 卡死不动"。
+      # 把输出重定向进文件（> server.log 2>&1）就断开管道了，这才是关键。
+      #
+      # 【为什么要 --noreload？】
+      # runserver 默认开自动重载，会 fork 一个子进程。
+      # 父进程被杀、子进程还占着 8000 端口，后续连接就乱了。
+      #
+      # 【为什么最后一条命令是 pytest？】
+      # step 的退出码 = 最后一条命令的退出码。
+      # 用例失败 → pytest 返回非 0 → step 变红 → job 变红。
+      # 这就是这道 CI 关卡真正"拦人"的地方。
+      # ------------------------------------------------------------
+      - name: 起被测服务并执行接口用例
+        run: |
+          python manage.py runserver 127.0.0.1:8000 --noreload > server.log 2>&1 &
+
+          READY=0
+          for i in $(seq 1 30); do
+            # 注意不加 -f：能收到任何 HTTP 响应就算活着（哪怕是 404）
+            if curl -s -o /dev/null http://127.0.0.1:8000/api/projects/; then
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$READY" -ne 1 ]; then
+            echo "::error::被测服务 30 秒内没起来"
+            cat server.log
+            exit 1
+          fi
+
+          echo "被测服务已就绪，开始跑用例"
+          cd api_test && python -m pytest
+
+      # ------------------------------------------------------------
+      # 以下几步都带 if: always()
+      #
+      # 意思是"不管前面成功还是失败，都要跑"。
+      # 用例挂了恰恰是最需要报告的时候 —— 不能因为上一步失败就跳过上传，
+      # 否则你打开 CI 只看到一个红叉，什么线索都没有。
+      # ------------------------------------------------------------
+
+      - name: 上传被测服务的日志
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: django-server-log
+          path: server.log
+          if-no-files-found: ignore
+
+      # 故意和上一步分开，并且 continue-on-error。
+      # 因为"用例失败"和"报告没生成出来"是【两回事】：
+      #   混在一起的话，一个 allure 环境问题会让整个 job 变红，
+      #   你会以为是代码挂了，白查半天。
+      # 分开之后语义很清楚 —— 这个 step 红了，就是报告的问题。
+      - name: 生成 Allure 报告（失败只警告，不影响结论）
+        if: always()
+        continue-on-error: true
+        run: allure generate api_test/allure_results -o api_test/allure_report --clean
+
+      - name: 上传 Allure 报告
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: allure-report
+          path: api_test/allure_report
+          if-no-files-found: warn
+
+      # 原始结果也传一份。理由：HTML 报告是"给人看的"，
+      # 万一生成失败，这些 JSON 就是唯一的救命数据 —— 本地也能重新生成。
+      - name: 上传 Allure 原始结果
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: allure-results-raw
+          path: api_test/allure_results
+          if-no-files-found: warn

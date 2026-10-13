@@ -1,0 +1,37 @@
+# ============================================================
+#  测试依赖 —— 「跑接口自动化用例」额外需要什么
+#
+#  安装：pip install -r requirements-test.txt
+#  CI 用的就是这一份（见 .github/workflows/ci.yml）
+#
+#  【为什么 allure-pytest 不能省？】
+#  api_test/pytest.ini 的 addopts 里写死了 --alluredir=./allure_results。
+#  这个命令行参数是 allure-pytest 插件提供的 —— 插件没装，pytest 会直接报
+#  "unrecognized arguments: --alluredir"，44 条用例一条都跑不起来。
+#  它不是"想要报告才装"的可选项，是【必装项】。
+#
+#  【为什么 PyYAML 不能省？】
+#  数据驱动的用例（test_projects_ddt.py）靠 data_loader.py 读 YAML，
+#  那个模块第一行就是 import yaml。
+# ============================================================
+
+-r requirements.txt
+
+requests==2.34.2
+pytest==9.1.1
+allure-pytest==2.16.0
+PyYAML==6.0.3
+
+# ------------------------------------------------------------
+# 【注意：这里故意不写 pytest-result-sender】
+#
+# 本机 .venv 里装着一个叫 pytest_result_sender 的第三方插件，
+# 它会在测试跑完后，把结果 POST 到一个 webhook 地址（企业微信 markdown 格式）。
+#
+# 目前它是"哑"的：开关是 pytest.ini 里的 ini 选项 send_api，
+# 而我们的 pytest.ini 没配这一项，所以 send_result() 会直接 return，不外发数据。
+#
+# 但它来历不明、且会主动发起网络请求，所以：
+#   1) 不写进依赖清单 —— 别人不必装它
+#   2) 缺了它也不会报错 —— pytest.ini 没有强引用它
+# ------------------------------------------------------------
